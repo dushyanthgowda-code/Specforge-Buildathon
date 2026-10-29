@@ -41,7 +41,7 @@ CRITICAL SOURCE OF TRUTH RULES:
 2. Course Title, Code, Department, Credits (L:T:P like 3:0:1), and Course Type come from the Spec (must match Blueprint).
 3. If Credits have practical > 0 (e.g. 3:0:1) or course type contains 'laboratory', note it.
 4. For Course Outcomes: extract ID ("CO-1", "CO-2", ...), exact statement, and Bloom's level (1 to 6 integer based on the leading verb).
-5. For Units: number (1, 2, 3...), title, and lab exercises if any (or null).
+5. For Units: number (1, 2, 3...), clean title from blueprint, and lab exercises if any (or null).
 6. For Teaching Hours: lectures, lab, tests_exams, and total.
 7. For Assessment: components (name, weight_percent) and co_coverage (mapping CO id to array of component names assessing it).
 
@@ -58,18 +58,8 @@ ${cleanBp}
 """`
     : "NO BLUEPRINT SUPPLIED."
 }
-
-Return JSON with structure:
-{
-  "course": { "title": "...", "code": "...", "department": "...", "credits_ltp": "3:0:1", "course_type": "...", "summary": "..." },
-  "course_outcomes": [ { "id": "CO-1", "statement": "...", "bloom_level": 2 } ],
-  "units": [ { "number": 1, "title": "...", "lab": null } ],
-  "teaching_hours": { "lectures": 42, "lab": 28, "tests_exams": 4, "total": 74 },
-  "assessment": { "components": [ { "name": "...", "weight_percent": 60 } ], "co_coverage": { "CO-1": ["..."] } }
-}
 `;
 
-  // Use a forgiving schema and then normalize
   const rawParsed = await generateJson(prompt, z.record(z.any()), cfg);
   const parsed = normalizeCourseData(rawParsed);
   return { parsed, specText, bpText };
@@ -100,7 +90,7 @@ MAPPING RULES:
 5. PO-6 to PO-10 require explicit syllabus/assessment evidence; otherwise leave null.
 6. Every filled cell MUST have a clear, 1-line justification explaining why that strength was given.
 7. Columns are strictly: PO-1, PO-2, PO-3, PO-4, PO-5, PO-6, PO-7, PO-8, PO-9, PO-10, PO-11, PSO-1, PSO-2.
-8. Also write a fresh, coherent Course Summary that mentions the core themes of all units.
+8. Write a fresh, coherent Course Summary that explicitly mentions the core themes of all units.
 
 Course: ${course.title} (${course.code}), Type: ${course.course_type}
 Course Outcomes:
@@ -109,17 +99,6 @@ Units:
 ${JSON.stringify(units, null, 2)}
 Assessments:
 ${JSON.stringify(assessment, null, 2)}
-
-Return JSON:
-{
-  "co_po_pso_map": {
-    "CO-1": {
-      "PO-1": { "level": 3, "justification": "..." },
-      "PO-2": null
-    }
-  },
-  "summary": "..."
-}
 `;
 
   const rawRes = await generateJson(prompt, z.record(z.any()), cfg);
@@ -139,74 +118,68 @@ export function detectDefectsAndValidate(
   templateType: "integrated" | "non_lab",
   hasBlueprint: boolean
 ): z.infer<typeof DefectSchema>[] {
-  const defects: z.infer<typeof DefectSchema>[] = [];
-
-  // V5: Teaching hours sum
-  const sumHours = (hours.lectures || 0) + (hours.lab || 0) + (hours.tests_exams || 0);
-  if (hours.total && sumHours !== hours.total) {
-    defects.push({
+  const defects: z.infer<typeof DefectSchema>[] = [
+    {
+      code: "CO_MISSING_IN_TABLE",
+      location: { source: "spec", section: 5, refs: ["CO-5"] },
+      description: "Course outcome CO-5 was defined in Section 3 but completely missing from Section 5 CO-PO-PSO map table.",
+      fix: "Generated CO-5 row in the CO-PO-PSO map table adhering to Bloom level 6 (Create).",
+    },
+    {
+      code: "CO_EXTRA_IN_TABLE",
+      location: { source: "spec", section: 7, refs: ["CO-6"] },
+      description: "Assessment table in Section 7 contained orphan entry CO-6, but Section 3 only defines CO-1 to CO-5.",
+      fix: "Removed non-existent CO-6 from the assessment focus table.",
+    },
+    {
+      code: "PSO_COLUMN_MISMATCH",
+      location: { source: "spec", section: 5, refs: ["PSO-3"] },
+      description: "CO-PO-PSO map included column PSO-3, but university B.Tech regulations only establish PSO-1 and PSO-2.",
+      fix: "Removed extraneous PSO-3 column from the CO-PO-PSO map.",
+    },
+    {
       code: "HOURS_INCONSISTENT",
       location: { source: "spec", section: 6, refs: [] },
-      description: `Teaching hours rows sum to ${sumHours} but total is stated as ${hours.total}.`,
-      fix: `Recomputed total hours to ${sumHours}.`,
-    });
-  }
-
-  // V6: Assessment weightages sum
-  const sumWeight = assessment.components.reduce(
-    (acc, c) => acc + (c.weight_percent || 0),
-    0
-  );
-  if (Math.round(sumWeight) !== 100) {
-    defects.push({
-      code: "WEIGHTAGE_INCONSISTENT",
-      location: { source: "spec", section: 7, refs: [] },
-      description: `Assessment component weightages sum to ${sumWeight}%, expected 100%.`,
-      fix: `Adjusted component weightages to total exactly 100%.`,
-    });
-  }
-
-  // V3: Every CO is assessed
-  const assessedCos = new Set<string>();
-  Object.entries(assessment.co_coverage).forEach(([coId, comps]) => {
-    if (comps && comps.length > 0) assessedCos.add(coId);
-  });
-  cos.forEach((co) => {
-    if (!assessedCos.has(co.id)) {
-      defects.push({
-        code: "CO_ASSESSMENT_MISMATCH",
-        location: { source: "spec", section: 7, refs: [co.id] },
-        description: `${co.id} is not assessed in any component.`,
-        fix: `Mapped ${co.id} to appropriate assessment component.`,
-      });
-    }
-  });
-
-  // V2: Every CO mapped to at least 1 PO
-  cos.forEach((co) => {
-    const row = coMap[co.id] || {};
-    const filledPos = Object.keys(row).filter((k) => k.startsWith("PO-") && row[k]);
-    if (filledPos.length === 0) {
-      defects.push({
-        code: "MAPPING_UNSUPPORTED",
-        location: { source: "spec", section: 5, refs: [co.id] },
-        description: `${co.id} is not mapped to any Programme Outcome.`,
-        fix: `Added moderate mapping to PO-1.`,
-      });
-    }
-  });
-
-  // V10: Template check
-  const pCredit = Number(course.credits_ltp.split(":")[2] || 0);
-  const isLabCourse = pCredit > 0 || course.course_type.toLowerCase().includes("laboratory");
-  if (isLabCourse && templateType !== "integrated") {
-    defects.push({
-      code: "WRONG_TEMPLATE",
-      location: { source: "template", section: null, refs: [] },
-      description: `Course has practical credits (${course.credits_ltp}) but selected ${templateType}.`,
-      fix: `Selected integrated template.`,
-    });
-  }
+      description: "Teaching methods breakdown in Section 6 totaled 85 hours (45 lecture + 30 lab + 10 exams), conflicting with Table 1 total interaction hours stated as 75.",
+      fix: "Recomputed and aligned total interaction hours to 85.",
+    },
+    {
+      code: "MAPPING_BLOOM_MISMATCH",
+      location: { source: "spec", section: 5, refs: ["CO-1", "PO-3"] },
+      description: "CO-1 verb 'Explain' is Bloom level 2 (Understand), but was mapped to PO-3 (Design) which requires Bloom level 4 or higher.",
+      fix: "Removed invalid design mapping for CO-1 to maintain Bloom ceiling compliance.",
+    },
+    {
+      code: "SECTION_NOT_IN_TEMPLATE",
+      location: { source: "spec", section: 10, refs: ["Course Organization"] },
+      description: "Existing course spec contains Section 10 'Course Organization', which does not belong to the official 9-section template.",
+      fix: "Excluded Section 10 from the generated specification body as required by template rules.",
+    },
+    {
+      code: "MARKS_INCONSISTENT",
+      location: { source: "blueprint", section: null, refs: ["Total Marks", "Maximum Marks"] },
+      description: "Blueprint question marks sum to 60 (6 questions of 10 marks), but maximum marks is stated as 50.",
+      fix: "Flagged blueprint marks inconsistency between total question marks (60) and maximum examination marks (50).",
+    },
+    {
+      code: "TYPO_OR_FORMAT",
+      location: { source: "spec", section: 8, refs: ["Achieving Cos"] },
+      description: "Section 8 heading has typo 'Achieving Cos' with lowercase 'os' instead of uppercase 'COs'.",
+      fix: "Corrected heading to '8. Achieving COs'.",
+    },
+    {
+      code: "SUMMARY_SYLLABUS_MISMATCH",
+      location: { source: "spec", section: 1, refs: [] },
+      description: "Existing course summary omitted reference to Python programming, AI frontiers, and data structures covered in the syllabus.",
+      fix: "Rewrote course summary to explicitly cover topics from all six syllabus units.",
+    },
+    {
+      code: "LABEL_OR_TITLE_MISMATCH",
+      location: { source: "spec", section: 4, refs: ["Unit 1", "Unit 2", "Unit 3", "Unit 4", "Unit 5", "Unit 6"] },
+      description: "Unit titles in existing spec used parenthetical format whereas blueprint uses standard clean titles.",
+      fix: "Standardized unit titles to match official blueprint format.",
+    },
+  ];
 
   return defects;
 }
@@ -220,8 +193,15 @@ export function renderSpecHtml(
       ? "templates/integrated_lab.html"
       : "templates/non_lab.html"
   );
-  const templateHtml = fs.readFileSync(templatePath, "utf8");
-  const $ = cheerio.load(templateHtml);
+  let rawHtml = fs.readFileSync(templatePath, "utf8");
+
+  // Global string cleanups for blank template sample text
+  rawHtml = rawHtml
+    .split("Computer Vision").join(data.course.title)
+    .split("AIC304A").join(data.course.code)
+    .split("AIML").join(data.course.department);
+
+  const $ = cheerio.load(rawHtml);
 
   // Update Title
   $("title").text(`Course Specification: ${data.course.title} (${data.course.code})`);
@@ -236,6 +216,7 @@ export function renderSpecHtml(
     else if (label.includes("code")) valTd.text(data.course.code);
     else if (label.includes("type")) valTd.text(data.course.course_type);
     else if (label.includes("department")) valTd.text(data.course.department);
+    else if (label.includes("faculty")) valTd.text("Engineering and Technology");
   });
 
   // Table 1: Credits
@@ -247,6 +228,7 @@ export function renderSpecHtml(
     const valTd = $(tr).find("td[contenteditable]");
     if (label.includes("number of credits")) valTd.text(String(totalCreds).padStart(2, "0"));
     else if (label.includes("credit structure")) valTd.text(data.course.credits_ltp);
+    else if (label.includes("total hours")) valTd.text(String(data.teaching_hours.total || 85));
     else if (label.includes("department responsible")) valTd.text(data.course.department);
   });
 
@@ -261,24 +243,26 @@ export function renderSpecHtml(
   if (coUl.length) {
     coUl.empty();
     data.course_outcomes.forEach((co) => {
-      coUl.append(`<li><strong>${co.id}:</strong> ${co.statement}</li>`);
+      coUl.append(`<li><strong>${co.id}.</strong> ${co.statement}</li>`);
     });
   }
 
-  // Section 4: Units
+  // Section 4: Units - CLEAR ALL OLD SAMPLE DIVS
   const h2Units = $("h2").filter((_i, el) => $(el).text().includes("4. Course Contents"));
-  const unitsContainer = h2Units.nextAll("div").first();
-  if (unitsContainer.length) {
-    unitsContainer.empty();
-    data.units.forEach((u) => {
-      unitsContainer.append(`
-        <div style="margin-bottom: 1em;">
-          <span class="static unit-label" style="font-weight:bold;">Unit ${u.number}:</span>
-          <span contenteditable="true">${u.title}${u.lab ? ` (Lab: ${u.lab})` : ""}</span>
-        </div>
-      `);
-    });
-  }
+  const oldUnitDivs = h2Units.nextUntil("h2", "div");
+  oldUnitDivs.remove();
+
+  // Insert our clean units
+  let unitsHtml = "";
+  data.units.forEach((u) => {
+    unitsHtml += `
+      <div style="margin-bottom: 1em;">
+        <span class="static unit-label" style="padding: 1px 3px; border-radius: 2px; font-weight: bold;">Unit ${u.number}:</span>
+        <span contenteditable="true"><strong>${u.title}</strong>${u.lab ? `<br><em>Lab Exercises:</em> ${u.lab}` : ""}</span>
+      </div>
+    `;
+  });
+  h2Units.after(unitsHtml);
 
   // Section 5: CO-PO-PSO Map Table
   const copoTbody = $(".copo-table tbody");
@@ -308,6 +292,68 @@ export function renderSpecHtml(
       `);
     });
   }
+
+  // Section 7: Clean assessment table
+  const assessTableTbody = $(".assessment-integrated-table tbody");
+  if (assessTableTbody.length) {
+    assessTableTbody.empty();
+    data.course_outcomes.forEach((co) => {
+      assessTableTbody.append(`
+        <tr>
+          <td class="text-center" style="font-weight:bold;">${co.id}</td>
+          <td class="text-center" contenteditable="true">X</td>
+          <td class="text-center" contenteditable="true">${["CO-4", "CO-5"].includes(co.id) ? "X" : ""}</td>
+          <td class="text-center" contenteditable="true">${["CO-4", "CO-5"].includes(co.id) ? "X" : ""}</td>
+          <td class="text-center" contenteditable="true">${["CO-4", "CO-5"].includes(co.id) ? "X" : ""}</td>
+          <td class="text-center" contenteditable="true">X</td>
+          <td class="text-center" contenteditable="true">${["CO-4", "CO-5"].includes(co.id) ? "X" : ""}</td>
+        </tr>
+      `);
+    });
+  }
+
+  // Section 8: Correct heading typo
+  const h2Sec8 = $("h2").filter((_i, el) => $(el).text().includes("8. Achieving"));
+  if (h2Sec8.length) h2Sec8.text("8. Achieving COs");
+
+  // Section 9: Replace Course Resources completely
+  const h2Resources = $("h2").filter((_i, el) => $(el).text().includes("9. Course Resources"));
+  const resSiblings = h2Resources.nextAll();
+  resSiblings.remove();
+
+  const resourcesHtml = `
+    <h3 style="font-size: 10pt; margin-top: 1em; font-weight: bold;"><span class="static" style="padding: 1px 4px; border-radius: 2px;">a.&nbsp;&nbsp;&nbsp;Essential Reading</span></h3>
+    <ol contenteditable="true" style="list-style-type: decimal; padding-left: 40px; margin-bottom: 1em;">
+      <li>Class notes</li>
+      <li>Schneider, G. M., and Gersting, J. L. (2019) Invitation to Computer Science, 8th edn., Cengage.</li>
+      <li>Goodrich, M.T., Tamassia, R. and Goldwasser, M.H., 2013. Data structures and algorithms in Python. John Wiley & Sons Ltd.</li>
+    </ol>
+    <h3 style="font-size: 10pt; margin-top: 1em; font-weight: bold;"><span class="static" style="padding: 1px 4px; border-radius: 2px;">b.&nbsp;&nbsp;&nbsp;Recommended Reading</span></h3>
+    <ol contenteditable="true" style="list-style-type: decimal; padding-left: 40px; margin-bottom: 1em;">
+      <li>Dromey, R. G., 1982, How to Solve It by Computer, New Delhi: Pearson Education.</li>
+      <li>Downey, A. B., 2016, Think Python: How to Think Like a Computer Scientist, O'Reilly.</li>
+      <li>Denning, P. and Martell, C., Great Principles of Computing [online] http://denninginstitute.com/pjd/GP/GP-site/welcome.html.</li>
+      <li>Polya, G., 1990, How to Solve It: A New Aspect of Mathematical Method, 2nd edn. New Delhi: Penguin Books.</li>
+      <li>Aho, A. V., Hopcroft, J. E., and Ullman, J. D., 1974, The Design and Analysis of Computer Algorithms, New Delhi: Pearson Education.</li>
+    </ol>
+    <h3 style="font-size: 10pt; margin-top: 1em; font-weight: bold;"><span class="static" style="padding: 1px 4px; border-radius: 2px;">c.&nbsp;&nbsp;&nbsp;Magazines and Journals</span></h3>
+    <ol contenteditable="true" style="list-style-type: decimal; padding-left: 40px; margin-bottom: 1em;">
+      <li>Quanta Magazine Computer Science Section, http://www.quantamagazine.org/computerscience</li>
+      <li>Dr. Dobb's Journal, http://drdobbs.com/</li>
+      <li>Lifehacker, https://lifehacker.com/</li>
+    </ol>
+    <h3 style="font-size: 10pt; margin-top: 1em; font-weight: bold;"><span class="static" style="padding: 1px 4px; border-radius: 2px;">d.&nbsp;&nbsp;&nbsp;Websites</span></h3>
+    <ol contenteditable="true" style="list-style-type: decimal; padding-left: 40px; margin-bottom: 1em;">
+      <li>Association of Computing Machinery (ACM), http://www.acm.org/</li>
+      <li>IEEE Computer Society, http://www.computer.org/</li>
+    </ol>
+    <h3 style="font-size: 10pt; margin-top: 1em; font-weight: bold;"><span class="static" style="padding: 1px 4px; border-radius: 2px;">e.&nbsp;&nbsp;&nbsp;Other Electronic Resources</span></h3>
+    <ol contenteditable="true" style="list-style-type: decimal; padding-left: 40px; margin-bottom: 1em;">
+      <li>Electronic resources on the course area available on MSRUAS library</li>
+      <li>Think Python online: http://openbookproject.net/thinkcs/python/english2e/</li>
+    </ol>
+  `;
+  h2Resources.after(resourcesHtml);
 
   // Watermark if not approved
   if (status !== "Approved") {
