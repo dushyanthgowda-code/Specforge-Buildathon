@@ -174,6 +174,15 @@ api.post(
   }
 );
 
+api.get("/latest-output", (_req, res) => {
+  if (fs.existsSync("outputs/specforge_output.json") && fs.existsSync("outputs/spec.html")) {
+    const output = JSON.parse(fs.readFileSync("outputs/specforge_output.json", "utf8"));
+    const html = fs.readFileSync("outputs/spec.html", "utf8");
+    return ok(res, { output, html });
+  }
+  fail(res, 404, "NO_OUTPUT", "No generated output found yet.");
+});
+
 // Convenience 1-click test route for the frontend
 api.post("/generate-sample", async (req, res, next) => {
   try {

@@ -64,6 +64,10 @@ export default function App() {
     call<{ status: string }>("/health")
       .then((d) => setHealth(d.status))
       .catch(() => setHealth("server not reachable"));
+
+    call<GenerationResult>("/latest-output")
+      .then((data) => setResult(data))
+      .catch(() => {});
   }, []);
 
   async function handleRunSample() {
