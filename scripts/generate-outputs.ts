@@ -135,7 +135,7 @@ const specforgeOutput: SpecForgeOutput = {
       "CO-1": ["Continuous Evaluation (CE)", "Semester End Exam (SEE)"],
       "CO-2": ["Continuous Evaluation (CE)", "Semester End Exam (SEE)"],
       "CO-3": ["Continuous Evaluation (CE)", "Semester End Exam (SEE)"],
-      "CO-4": ["Continuous Evaluation (CE)", "Semester End Exam (SEE)", "Laboratory Examination (Lab)"],
+      "CO-4": ["Continuous Evaluation (CE)", "Semester End Exam (SEE)"],
       "CO-5": ["Continuous Evaluation (CE)", "Semester End Exam (SEE)", "Laboratory Examination (Lab)"],
     },
   },
