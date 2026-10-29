@@ -8,7 +8,7 @@ import { ApiError } from "./envelope.js";
 export type Provider = "gemini" | "openrouter" | "anthropic";
 export type LlmConfig = { provider: Provider; key: string; model: string };
 
-export const DEFAULT_MODELS = { gemini: "gemini-3.5-flash-lite", openrouter: "google/gemini-3.5-flash-lite", anthropic: "claude-sonnet-5-5" } as const;
+export const DEFAULT_MODELS = { gemini: "gemini-3.8-flash", openrouter: "google/gemini-3.8-flash", anthropic: "claude-sonnet-5-5" } as const;
 
 export function configFromRequest(req: Request): LlmConfig {
   const provider = String(req.header("x-llm-provider") ?? "").toLowerCase();
@@ -45,34 +45,52 @@ function providerError(status: number, raw: string, cfg: LlmConfig): ApiError {
 }
 
 async function callProvider(prompt: string, cfg: LlmConfig): Promise<string> {
-  if (cfg.provider === "gemini") {
+  let lastError: any = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const ai = new GoogleGenAI({ apiKey: cfg.key });
-      const r = await ai.models.generateContent({ model: cfg.model, contents: prompt, config: { responseMimeType: "application/json" } });
-      return r.text ?? "";
+      if (cfg.provider === "gemini") {
+        const ai = new GoogleGenAI({ apiKey: cfg.key });
+        const r = await ai.models.generateContent({
+          model: cfg.model,
+          contents: prompt,
+          config: { responseMimeType: "application/json" },
+        });
+        return r.text ?? "";
+      }
+      if (cfg.provider === "anthropic") {
+        const r = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: { "x-api-key": cfg.key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
+          body: JSON.stringify({ model: cfg.model, max_tokens: 8000, messages: [{ role: "user", content: prompt }] }),
+        });
+        if (!r.ok) throw providerError(r.status === 529 ? 429 : r.status, await r.text(), cfg);
+        const j: any = await r.json();
+        return (j?.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
+      }
+      const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${cfg.key}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } }),
+      });
+      if (!r.ok) throw providerError(r.status, await r.text(), cfg);
+      const j: any = await r.json();
+      if (j?.error) throw providerError(Number(j.error.code) || 502, JSON.stringify(j), cfg);
+      return j?.choices?.[0]?.message?.content ?? "";
     } catch (e: any) {
-      throw providerError(Number(e?.status ?? e?.code ?? 0), String(e?.message ?? e), cfg);
+      lastError = e;
+      console.warn(`[Network] AI request attempt ${attempt + 1} failed:`, e?.message || e);
+      if (attempt === 0) {
+        // Wait 1.5 seconds before retrying
+        await new Promise((res) => setTimeout(res, 1500));
+      }
     }
   }
-  if (cfg.provider === "anthropic") {
-    const r = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: { "x-api-key": cfg.key, "anthropic-version": "2023-06-01", "content-type": "application/json" },
-      body: JSON.stringify({ model: cfg.model, max_tokens: 8000, messages: [{ role: "user", content: prompt }] }),
-    });
-    if (!r.ok) throw providerError(r.status === 529 ? 429 : r.status, await r.text(), cfg);
-    const j: any = await r.json();
-    return (j?.content ?? []).filter((b: any) => b.type === "text").map((b: any) => b.text).join("");
-  }
-  const r = await fetch("https://openrouter.ai/api/v1/chat/completions", {
-    method: "POST",
-    headers: { Authorization: `Bearer ${cfg.key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({ model: cfg.model, messages: [{ role: "user", content: prompt }], response_format: { type: "json_object" } }),
-  });
-  if (!r.ok) throw providerError(r.status, await r.text(), cfg);
-  const j: any = await r.json();
-  if (j?.error) throw providerError(Number(j.error.code) || 502, JSON.stringify(j), cfg);
-  return j?.choices?.[0]?.message?.content ?? "";
+
+  throw providerError(
+    Number(lastError?.status ?? lastError?.code ?? 0),
+    String(lastError?.message ?? lastError),
+    cfg
+  );
 }
 
 export async function generateJson<T>(prompt: string, schema: ZodType<T>, cfg: LlmConfig): Promise<T> {
@@ -83,10 +101,12 @@ export async function generateJson<T>(prompt: string, schema: ZodType<T>, cfg: L
     try {
       const parsed = schema.safeParse(JSON.parse(stripFences(raw)));
       if (parsed.success) return parsed.data;
-      last = parsed.error.issues.slice(0, 3).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
-    } catch {
-      last = "not parseable JSON";
+      last = parsed.error.issues.slice(0, 5).map((i) => `${i.path.join(".")}: ${i.message}`).join("; ");
+      console.error(`[Attempt ${attempt + 1}] Zod validation failed:`, last);
+    } catch (e: any) {
+      last = `not parseable JSON (${e?.message})`;
+      console.error(`[Attempt ${attempt + 1}] JSON parse error:`, last, "\nRaw:", raw.slice(0, 300));
     }
   }
-  throw new ApiError(502, "BAD_AI_OUTPUT", "The AI did not return valid JSON. Try again or pick another model.");
+  throw new ApiError(502, "BAD_AI_OUTPUT", `The AI did not return valid JSON: ${last}`);
 }
