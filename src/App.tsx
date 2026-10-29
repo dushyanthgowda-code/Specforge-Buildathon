@@ -251,25 +251,39 @@ export default function App() {
                 </span>
               </div>
               <div className="row">
-                <button
-                  onClick={() =>
-                    downloadFile(
-                      "specforge_output.json",
-                      JSON.stringify(result.output, null, 2),
-                      "application/json"
-                    )
-                  }
+                <a
+                  href="/api/v1/download/json"
+                  download="specforge_output.json"
+                  style={{
+                    display: "inline-block",
+                    padding: "9px 16px",
+                    background: "#2563eb",
+                    color: "#fff",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    fontSize: ".9rem",
+                  }}
                 >
-                  Download specforge_output.json (80 pts)
-                </button>
-                <button
-                  className="secondary"
-                  onClick={() =>
-                    downloadFile("spec.html", result.html, "text/html")
-                  }
+                  📥 Download specforge_output.json (80 pts)
+                </a>
+                <a
+                  href="/api/v1/download/html"
+                  download="spec.html"
+                  style={{
+                    display: "inline-block",
+                    padding: "9px 16px",
+                    background: "#f1f5f9",
+                    color: "#334155",
+                    border: "1px solid #cbd5e1",
+                    borderRadius: "8px",
+                    fontWeight: 600,
+                    textDecoration: "none",
+                    fontSize: ".9rem",
+                  }}
                 >
-                  Download spec.html (20 pts)
-                </button>
+                  📥 Download spec.html (20 pts)
+                </a>
                 <button className="ghost" onClick={openHtmlPreview}>
                   Preview Spec Document ↗
                 </button>

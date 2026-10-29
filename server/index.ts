@@ -174,6 +174,18 @@ api.post(
   }
 );
 
+api.get("/download/json", (_req, res) => {
+  const file = path.resolve("outputs/specforge_output.json");
+  if (fs.existsSync(file)) return res.download(file, "specforge_output.json");
+  fail(res, 404, "NOT_FOUND", "File not ready yet");
+});
+
+api.get("/download/html", (_req, res) => {
+  const file = path.resolve("outputs/spec.html");
+  if (fs.existsSync(file)) return res.download(file, "spec.html");
+  fail(res, 404, "NOT_FOUND", "File not ready yet");
+});
+
 api.get("/latest-output", (_req, res) => {
   if (fs.existsSync("outputs/specforge_output.json") && fs.existsSync("outputs/spec.html")) {
     const output = JSON.parse(fs.readFileSync("outputs/specforge_output.json", "utf8"));
