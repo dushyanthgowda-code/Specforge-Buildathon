@@ -9,7 +9,8 @@
     "build": "tsc --noEmit && vite build",
     "typecheck": "tsc --noEmit",
     "check": "tsx scripts/check-output.ts",
-    "verify": "tsx scripts/verify-run.ts"
+    "verify": "tsx scripts/verify-run.ts",
+    "postinstall": "tsx scripts/generate-outputs.ts"
   },
   "dependencies": {
     "@google/genai": "^1.0.0",

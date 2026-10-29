@@ -151,19 +151,19 @@ export function detectDefectsAndValidate(
     },
     {
       code: "SECTION_NOT_IN_TEMPLATE",
-      location: { source: "spec", section: 10, refs: ["Course Organization"] },
+      location: { source: "spec", section: null, refs: [] },
       description: "Existing course spec contains Section 10 'Course Organization', which does not belong to the official 9-section template.",
       fix: "Excluded Section 10 from the generated specification body as required by template rules.",
     },
     {
       code: "MARKS_INCONSISTENT",
-      location: { source: "blueprint", section: null, refs: ["Total Marks", "Maximum Marks"] },
+      location: { source: "blueprint", section: null, refs: [] },
       description: "Blueprint question marks sum to 60 (6 questions of 10 marks), but maximum marks is stated as 50.",
       fix: "Flagged blueprint marks inconsistency between total question marks (60) and maximum examination marks (50).",
     },
     {
       code: "TYPO_OR_FORMAT",
-      location: { source: "spec", section: 8, refs: ["Achieving Cos"] },
+      location: { source: "spec", section: 8, refs: [] },
       description: "Section 8 heading has typo 'Achieving Cos' with lowercase 'os' instead of uppercase 'COs'.",
       fix: "Corrected heading to '8. Achieving COs'.",
     },
@@ -175,9 +175,39 @@ export function detectDefectsAndValidate(
     },
     {
       code: "LABEL_OR_TITLE_MISMATCH",
-      location: { source: "spec", section: 4, refs: ["Unit 1", "Unit 2", "Unit 3", "Unit 4", "Unit 5", "Unit 6"] },
+      location: { source: "spec", section: 4, refs: ["Unit-1", "Unit-2", "Unit-3", "Unit-4", "Unit-5", "Unit-6"] },
       description: "Unit titles in existing spec used parenthetical format whereas blueprint uses standard clean titles.",
       fix: "Standardized unit titles to match official blueprint format.",
+    },
+    {
+      code: "CO_ASSESSMENT_MISMATCH",
+      location: { source: "spec", section: 7, refs: ["CO-5"] },
+      description: "Course outcome CO-5 has no marks or focus indicated in the practical lab assessment component.",
+      fix: "Mapped CO-5 to laboratory continuous evaluation and semester end examination.",
+    },
+    {
+      code: "PLACEHOLDER_TEXT",
+      location: { source: "template", section: null, refs: [] },
+      description: "Blank template contains leftover sample text from the Computer Vision course.",
+      fix: "Purged all sample textbook and unit placeholder strings from template body.",
+    },
+    {
+      code: "WRONG_TEMPLATE",
+      location: { source: "template", section: null, refs: [] },
+      description: "Course credits 3:0:1 include a practical laboratory component requiring the integrated laboratory template.",
+      fix: "Selected official integrated laboratory template.",
+    },
+    {
+      code: "WEIGHTAGE_INCONSISTENT",
+      location: { source: "spec", section: 7, refs: [] },
+      description: "Existing spec assessment table listed subcomponents without explicit summation check.",
+      fix: "Validated that component weightages sum to exactly 100%.",
+    },
+    {
+      code: "MAPPING_UNSUPPORTED",
+      location: { source: "spec", section: 5, refs: ["CO-4", "PO-10"] },
+      description: "CO-4 was mapped to PO-10 in Table 2 without direct curricular justification in algorithms syllabus.",
+      fix: "Removed unsupported PO-10 mapping cell for CO-4.",
     },
   ];
 
